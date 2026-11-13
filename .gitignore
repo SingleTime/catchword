@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# 构建产物
+dist/
+*.app
+
+# 图标中间文件（可由 tools/make-icon.swift 重新生成）
+Resources/AppIcon.iconset/
+
+# 编辑器
+.vscode/
+.idea/
+*.xcuserdatad/
+
+# 本地笔记
+.workbuddy/
