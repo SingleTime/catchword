@@ -414,7 +414,7 @@ struct ProviderCard: View {
                                         .font(.system(size: 11, weight: .medium))
                                         .foregroundStyle(.secondary)
                                 }
-                                Text("系统翻译需要 macOS 26 或更新版本。在更老的系统上，单词会自动改用本机词典，整句请配置一个大模型服务。")
+                                Text("系统翻译需要 macOS 15 或更新版本。在这之前的系统里没有机器翻译引擎，单词会自动改用本机词典，整句请配置一个大模型服务。")
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -589,7 +589,7 @@ struct AboutTab: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 row("兼容系统", "macOS 12 及以上（通用二进制 arm64 + x86_64）")
-                row("系统翻译", "macOS 26+ 的离线翻译引擎")
+                row("系统翻译", "macOS 15+ 的离线翻译引擎")
                 row("本机词典", "任何版本都能用，查「词典.app」的离线词库")
                 row("大模型", "任何 OpenAI 兼容接口，Key 存钥匙串")
                 row("数据存储", "~/Library/Application Support/Catchword")

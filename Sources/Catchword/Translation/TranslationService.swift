@@ -120,7 +120,7 @@ final class TranslationService {
         }
     }
 
-    // MARK: - 系统翻译（macOS 26+）
+    // MARK: - 系统翻译（macOS 15+）
 
     private func runApple(text: String,
                           provider: Provider,
@@ -129,8 +129,8 @@ final class TranslationService {
                           dictionaryMode: Bool,
                           emit: @escaping (TranslationEvent) -> Void,
                           finish: @escaping (String, WordInfo?, String) -> Void) async {
-        guard #available(macOS 26.0, *) else {
-            // macOS 12–25 没有可用的系统翻译引擎，直接走兜底
+        guard #available(macOS 15.0, *) else {
+            // macOS 12–14 系统里没有机器翻译引擎，直接走兜底
             await fallback(after: .appleUnavailable(AppleEngine.unavailableReason),
                            text: text, targetCode: targetCode, wordMode: wordMode,
                            emit: emit, finish: finish, avoidedProviderID: provider.id)

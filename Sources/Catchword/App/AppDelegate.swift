@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PanelController.shared.setup()
         registerHotKey()
         installObservers()
+        prewarmTranslationHost()
 
         // 首次启动：提示授权
         if !Permissions.hasAccessibility,
@@ -53,6 +54,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         SettingsStore.shared.saveNow()
         HotKeyCenter.shared.uninstall()
+    }
+
+    /// macOS 15–25 的系统翻译要靠隐藏宿主窗口取 session（macOS 26+ 不需要）。
+    /// 提前搭好，第一次查词就少吃一次 ~200ms 的窗口启动开销。
+    private func prewarmTranslationHost() {
+        guard AppleEngine.needsBridge else { return }
+        let settings = SettingsStore.shared.settings
+        guard settings.primaryProvider?.kind == .apple else { return }
+        let target = settings.targetLanguage == "auto" ? "zh-Hans" : settings.targetLanguage
+        // 中文用户九成是英译中，先按这个方向预热；方向不对时 translate 会自己重建宿主
+        let guessSource = (target == "zh-Hans" || target == "zh-Hant") ? "en" : "zh-Hans"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard #available(macOS 15.0, *) else { return }
+            AppleSessionBridge.shared.prewarm(sourceCode: guessSource, targetCode: target)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
