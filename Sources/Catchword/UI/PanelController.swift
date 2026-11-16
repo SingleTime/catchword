@@ -43,6 +43,7 @@ final class PanelController {
     private init() {}
 
     var isVisible: Bool { panel?.isVisible ?? false }
+    var frame: NSRect { panel?.frame ?? .zero }
 
     func setup() {
         guard panel == nil else { return }

@@ -56,6 +56,46 @@ struct GeneralTab: View {
                     Divider().padding(.vertical, 2)
 
                     HStack {
+                        Label("划词即译", systemImage: "text.cursor")
+                        Spacer()
+                        Toggle("", isOn: store.bind(\.selectionTriggerEnabled))
+                            .labelsHidden()
+                            .onChange(of: store.settings.selectionTriggerEnabled) { _ in
+                                AppDelegate.shared?.applyTriggerSettings()
+                            }
+                    }
+                    Text("选中文字松手后，在选区右下角冒出一个「译」小圆点，点它或让鼠标停一下就展开。不用再按快捷键。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Label("双击直接展开", systemImage: "hand.tap")
+                        Spacer()
+                        Toggle("", isOn: store.bind(\.selectionDirectOnDoubleClick))
+                            .labelsHidden()
+                            .disabled(!store.settings.selectionTriggerEnabled)
+                    }
+
+                    HStack {
+                        Label("触发长度上限", systemImage: "textformat.size")
+                        Spacer()
+                        Stepper(value: store.bind(\.selectionMaxLength), in: 10...300, step: 10) {
+                            Text("\(store.settings.selectionMaxLength) 字符")
+                                .font(.system(size: 12))
+                                .monospacedDigit()
+                                .foregroundStyle(store.settings.selectionTriggerEnabled ? .primary : .secondary)
+                        }
+                        .disabled(!store.settings.selectionTriggerEnabled)
+                    }
+                    Text("只处理单行文本；超过这个长度（比如整段代码）不弹，避免误触。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider().padding(.vertical, 2)
+
+                    HStack {
                         Label("辅助功能权限", systemImage: "lock.shield")
                         Spacer()
                         PermissionBadge()

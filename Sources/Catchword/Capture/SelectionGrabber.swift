@@ -36,6 +36,58 @@ enum SelectionGrabber {
         return nil
     }
 
+    // MARK: - 划词触发用（只读 AX）
+
+    /// 划词场景下不能用「模拟 ⌘C」兜底：那会把用户刚选好的选区搞没。
+    /// 拿不到就返回 nil，让调用方安静地什么都不做。
+    static func captureSelection() -> Capture? {
+        let app = NSWorkspace.shared.frontmostApplication
+        guard let text = axSelectedText(app: app) else { return nil }
+        return Capture(text: text,
+                       appName: app?.localizedName ?? "",
+                       bundleID: app?.bundleIdentifier ?? "",
+                       method: "AX")
+    }
+
+    /// 选区左下角（Cocoa 屏幕坐标），拿不到返回 nil。
+    /// Chromium 系（Chrome / VS Code / Electron）经常不给 bounds，调用方要自己兜底到鼠标位置。
+    static func selectionAnchor() -> NSPoint? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef,
+              CFGetTypeID(focusedRef) == AXUIElementGetTypeID()
+        else { return nil }
+        let element = focusedRef as! AXUIElement
+
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef,
+              CFGetTypeID(rangeRef) == AXValueGetTypeID()
+        else { return nil }
+        let rangeValue = rangeRef as! AXValue
+        var range = CFRange()
+        guard AXValueGetValue(rangeValue, .cfRange, &range), range.length > 0 else { return nil }
+
+        var boundsRef: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element,
+                                                         kAXBoundsForRangeParameterizedAttribute as CFString,
+                                                         rangeValue,
+                                                         &boundsRef) == .success,
+              let boundsRef,
+              CFGetTypeID(boundsRef) == AXValueGetTypeID()
+        else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(boundsRef as! AXValue, .cgRect, &rect), rect.height > 0 else { return nil }
+
+        // AX 坐标以主屏左上角为原点，换成 Cocoa 的左下角原点
+        let height = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+            ?? NSScreen.main?.frame.height ?? 0
+        return NSPoint(x: rect.minX, y: height - rect.maxY)
+    }
+
     // MARK: - AX 读取
 
     private static func axSelectedText(app: NSRunningApplication?) -> String? {

@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registerHotKey()
         installObservers()
         prewarmTranslationHost()
+        applyTriggerSettings()
 
         // 首次启动：提示授权
         if !Permissions.hasAccessibility,
@@ -35,6 +36,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 NSApp.activate(ignoringOtherApps: true)
                 PanelController.shared.show(text: "serendipity", appName: "Demo")
+            }
+        }
+        if CommandLine.arguments.contains("--bubble-demo") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                SelectionBubble.shared.show(text: "serendipity", appName: "Demo",
+                                            anchor: NSEvent.mouseLocation)
+            }
+        }
+        if CommandLine.arguments.contains("--selftest-trigger") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.runTriggerSelfTest()
             }
         }
         if CommandLine.arguments.contains("--settings") {
@@ -54,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         SettingsStore.shared.saveNow()
         HotKeyCenter.shared.uninstall()
+        SelectionMonitor.shared.stop()
     }
 
     /// macOS 15–25 的系统翻译要靠隐藏宿主窗口取 session（macOS 26+ 不需要）。
@@ -197,9 +210,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.button?.toolTip = "捕词 · \(KeyCodeName.display(keyCode: SettingsStore.shared.settings.hotKeyCode, modifiers: SettingsStore.shared.settings.hotKeyModifiers))"
     }
 
+    // MARK: - 划词触发
+
+    /// 设置里改「划词即译」后调用，按需装/卸事件监听
+    func applyTriggerSettings() {
+        if SettingsStore.shared.settings.selectionTriggerEnabled {
+            // 权限可能是刚授的，每次回到前台都试一次
+            SelectionMonitor.shared.start()
+        } else {
+            SelectionMonitor.shared.stop()
+            SelectionBubble.shared.dismiss()
+        }
+    }
+
+    /// 自检：事件监听是否装上、气泡窗口能不能正常出现/收起
+    func runTriggerSelfTest() {
+        print("[selftest] 辅助功能: \(Permissions.hasAccessibility)")
+        print("[selftest] 设置: 划词=\(SettingsStore.shared.settings.selectionTriggerEnabled) 双击直出=\(SettingsStore.shared.settings.selectionDirectOnDoubleClick) 上限=\(SettingsStore.shared.settings.selectionMaxLength)")
+        print("[selftest] 事件监听: \(SelectionMonitor.shared.isRunning ? "运行中" : "未启动")")
+
+        let anchor = NSEvent.mouseLocation
+        SelectionBubble.shared.show(text: "serendipity", appName: "SelfTest", anchor: anchor)
+        print("[selftest] 气泡可见: \(SelectionBubble.shared.isVisible) frame=\(SelectionBubble.shared.frame)")
+        print("[selftest] 锚点: \(anchor)")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            SelectionBubble.shared.dismiss()
+            print("[selftest] 收起后可见: \(SelectionBubble.shared.isVisible)")
+            print("[selftest] 结束")
+            NSApp.terminate(nil)
+        }
+    }
+
     // MARK: - 取词
 
     func triggerCapture() {
+        SelectionBubble.shared.dismiss()
         if PanelController.shared.isVisible {
             PanelController.shared.hide()
             return
@@ -301,6 +347,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         observers.append(center.addObserver(forName: .lingoRequestVocabulary, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.openVocabulary() }
+        })
+        // 用户刚在系统设置里勾上辅助功能时，回到前台就把划词监听补装上
+        observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,
+                      SettingsStore.shared.settings.selectionTriggerEnabled,
+                      !SelectionMonitor.shared.isRunning,
+                      Permissions.hasAccessibility else { return }
+                self.applyTriggerSettings()
+            }
         })
     }
 }

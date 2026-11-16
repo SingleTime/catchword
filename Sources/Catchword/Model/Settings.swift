@@ -133,6 +133,14 @@ struct AppSettings: Codable {
     /// 取词方式：axOnly / clipboard
     var captureMode: String = "auto"
 
+    // 划词触发
+    /// 选中文字松手后弹小气泡（不再需要按键）
+    var selectionTriggerEnabled: Bool = true
+    /// 双击选词直接展开面板
+    var selectionDirectOnDoubleClick: Bool = true
+    /// 划词触发的最长文本长度（避免选中大段代码也弹）
+    var selectionMaxLength: Int = 60
+
     // 外观
     var fontSize: Double = 14
     var panelWidth: Double = 400
@@ -165,6 +173,9 @@ struct AppSettings: Codable {
         hotKeyModifiers = (try? d.decode(UInt32.self, forKey: .hotKeyModifiers)) ?? def.hotKeyModifiers
         hotKeyEnabled = (try? d.decode(Bool.self, forKey: .hotKeyEnabled)) ?? def.hotKeyEnabled
         captureMode = (try? d.decode(String.self, forKey: .captureMode)) ?? def.captureMode
+        selectionTriggerEnabled = (try? d.decode(Bool.self, forKey: .selectionTriggerEnabled)) ?? def.selectionTriggerEnabled
+        selectionDirectOnDoubleClick = (try? d.decode(Bool.self, forKey: .selectionDirectOnDoubleClick)) ?? def.selectionDirectOnDoubleClick
+        selectionMaxLength = (try? d.decode(Int.self, forKey: .selectionMaxLength)) ?? def.selectionMaxLength
         fontSize = (try? d.decode(Double.self, forKey: .fontSize)) ?? def.fontSize
         panelWidth = (try? d.decode(Double.self, forKey: .panelWidth)) ?? def.panelWidth
         autoCopyTranslation = (try? d.decode(Bool.self, forKey: .autoCopyTranslation)) ?? def.autoCopyTranslation
