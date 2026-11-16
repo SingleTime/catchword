@@ -618,7 +618,7 @@ struct AboutTab: View {
                 .font(.system(size: 42))
                 .foregroundStyle(.tint)
             Text("捕词 Catchword").font(.system(size: 18, weight: .semibold))
-            Text("版本 1.0.0 · 原生 SwiftUI / AppKit")
+            Text("版本 1.1.0 · 原生 SwiftUI / AppKit")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Text("选中即译 · 纯本地优先 · 越查越懂你")

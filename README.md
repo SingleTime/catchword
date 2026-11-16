@@ -29,7 +29,7 @@ macOS 原生取词翻译工具。划词即译——选中文字松手，选区�
 
 ## 下载安装（不用编译）
 
-到 [Releases](https://github.com/SingleTime/catchword/releases/latest) 下载 `Catchword-1.0.0-macOS-universal.zip`（arm64 + x86_64 通用包，约 2 MB），解压后把「捕词.app」拖进「应用程序」。
+到 [Releases](https://github.com/SingleTime/catchword/releases/latest) 下载 `Catchword-1.1.0-macOS-universal.zip`（arm64 + x86_64 通用包，约 2 MB），解压后把「捕词.app」拖进「应用程序」。
 
 **首次打开会被 Gatekeeper 拦住**——这个包是 ad-hoc 签名，没有 Apple 开发者证书、也没做公证。这是正常现象，三选一即可，之后不再提示：
 
