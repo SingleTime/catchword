@@ -212,6 +212,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - 划词触发
 
+    /// 重启自己。
+    /// macOS 的辅助功能授权是在进程启动时定格的，用户勾选时如果进程已经在跑，
+    /// 这个进程就永远读到 false —— 界面上表现成「勾了却还显示未授权」。只能重启。
+    func relaunchApp() {
+        SettingsStore.shared.saveNow()
+        let path = Bundle.main.bundlePath
+        let launcher = Process()
+        launcher.executableURL = URL(fileURLWithPath: "/bin/sh")
+        launcher.arguments = ["-c", "sleep 0.6; /usr/bin/open -n '\(path)'"]
+        try? launcher.run()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.terminate(nil)
+        }
+    }
+
     /// 设置里改「划词即译」后调用，按需装/卸事件监听
     func applyTriggerSettings() {
         if SettingsStore.shared.settings.selectionTriggerEnabled {

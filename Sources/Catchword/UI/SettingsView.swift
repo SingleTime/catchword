@@ -100,6 +100,10 @@ struct GeneralTab: View {
                         Spacer()
                         PermissionBadge()
                     }
+                    Text("刚在系统设置里勾上时，已运行的进程读不到新状态——显示未授权就点「重启」。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 SectionCard(title: "翻译", icon: "character.bubble") {
@@ -201,6 +205,11 @@ struct PermissionBadge: View {
                     Permissions.openAccessibilitySettings()
                 }
                 .controlSize(.small)
+                Button("重启") {
+                    AppDelegate.shared?.relaunchApp()
+                }
+                .controlSize(.small)
+                .help("已勾选但仍显示未授权时点这里：授权在进程启动时才生效")
             }
         }
         .onAppear {
