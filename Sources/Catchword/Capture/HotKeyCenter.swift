@@ -85,8 +85,28 @@ enum KeyCodeName {
 // MARK: - 权限
 
 enum Permissions {
+    /// 注意：`AXIsProcessTrusted()` 的结果在本进程内会被缓存 ——
+    /// 进程启动时没权限，之后用户再去系统设置勾上，这里依然返回 false，直到进程重启。
+    /// 判断「现在到底能不能用」请用 `canWorkNow`。
     static var hasAccessibility: Bool {
         AXIsProcessTrusted()
+    }
+
+    /// 实时判定，绕开 `AXIsProcessTrusted()` 的进程内缓存。
+    /// 做法是直接问系统一次：给别的 App 建个 AX 客户端读一个属性，
+    /// 没权限会立刻返回 `.apiDisabled`。零副作用 ——
+    /// 不要改用「试着建一个事件监听」来探测：主进程本来就占着一个 tap，再建第二个会失败，
+    /// 会把有权限误判成没权限。
+    static var canWorkNow: Bool {
+        if AXIsProcessTrusted() { return true }
+        let me = ProcessInfo.processInfo.processIdentifier
+        guard let other = NSWorkspace.shared.runningApplications.first(where: {
+            $0.processIdentifier != me && $0.activationPolicy == .regular
+        }) else { return false }
+        let ax = AXUIElementCreateApplication(other.processIdentifier)
+        var value: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(ax, kAXFocusedWindowAttribute as CFString, &value)
+        return err != .apiDisabled
     }
 
     /// 弹系统授权提示

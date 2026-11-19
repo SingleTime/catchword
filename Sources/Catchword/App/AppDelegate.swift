@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var vocabWindow: NSWindow?
     private var observers: [NSObjectProtocol] = []
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -19,15 +20,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PanelController.shared.setup()
         registerHotKey()
         installObservers()
+
+        // 服务菜单（右键 › 服务 › 用捕词翻译）：零权限，系统还会自动给它分配快捷键
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
         prewarmTranslationHost()
         applyTriggerSettings()
 
         // 首次启动：提示授权
-        if !Permissions.hasAccessibility,
+        if !Permissions.canWorkNow,
            !UserDefaults.standard.bool(forKey: "didPromptAccessibility") {
             UserDefaults.standard.set(true, forKey: "didPromptAccessibility")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self.promptAccessibility()
+            }
+        }
+
+        // 主动请求辅助功能授权：系统会弹「捕词想要控制这台电脑」并把本 app 登记进列表
+        if CommandLine.arguments.contains("--request-access") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                // LSUIElement 应用不在前台时系统会压掉这个授权提示，先激活
+                NSApp.activate(ignoringOtherApps: true)
+                Permissions.requestAccessibility()
+            }
+        }
+
+        // 端到端自检：写一次剪贴板，看气泡会不会自己冒出来
+        if CommandLine.arguments.contains("--clip-test") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let pb = NSPasteboard.general
+                print("[clip] watcher=\(ClipboardWatcher.shared.isRunning) 开关=\(SettingsStore.shared.settings.clipboardTriggerEnabled) 写入前=\(pb.changeCount) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
+                pb.clearContents()
+                pb.setString("serendipity", forType: .string)
+                print("[clip] 写入后=\(pb.changeCount)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                    print("[clip] 气泡可见=\(SelectionBubble.shared.isVisible) frame=\(SelectionBubble.shared.frame)")
+                    NSApp.terminate(nil)
+                }
             }
         }
 
@@ -177,7 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let permTitle = Permissions.hasAccessibility ? "辅助功能权限：已授权 ✓" : "辅助功能权限：未授权（点击授权）"
+        // 用 canWorkNow 而不是 hasAccessibility：后者在进程内被缓存，
+        // 用户刚在系统设置里勾上时这里仍会显示未授权。
+        let permTitle = Permissions.canWorkNow ? "辅助功能权限：已授权 ✓" : "辅助功能权限：未授权（点击授权）"
         let perm = NSMenuItem(title: permTitle, action: #selector(menuPermission), keyEquivalent: "")
         perm.target = self
         menu.addItem(perm)
@@ -227,6 +258,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 服务菜单入口：任意 App 里选中文字 → 右键 › 服务 › 用捕词翻译。
+    /// 选中文本由系统递过来，完全不需要辅助功能权限。
+    @objc func translateService(_ pboard: NSPasteboard,
+                                userData: String,
+                                error: AutoreleasingUnsafeMutablePointer<NSString>) {
+        guard let text = pboard.string(forType: .string),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        NSApp.activate(ignoringOtherApps: true)
+        PanelController.shared.show(text: text, appName: app)
+    }
+
     /// 设置里改「划词即译」后调用，按需装/卸事件监听
     func applyTriggerSettings() {
         if SettingsStore.shared.settings.selectionTriggerEnabled {
@@ -236,23 +279,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             SelectionMonitor.shared.stop()
             SelectionBubble.shared.dismiss()
         }
+        // 复制即译不需要任何权限，独立开关
+        if SettingsStore.shared.settings.clipboardTriggerEnabled {
+            ClipboardWatcher.shared.start()
+        } else {
+            ClipboardWatcher.shared.stop()
+        }
     }
 
     /// 自检：事件监听是否装上、气泡窗口能不能正常出现/收起
     func runTriggerSelfTest() {
-        print("[selftest] 辅助功能: \(Permissions.hasAccessibility)")
-        print("[selftest] 设置: 划词=\(SettingsStore.shared.settings.selectionTriggerEnabled) 双击直出=\(SettingsStore.shared.settings.selectionDirectOnDoubleClick) 上限=\(SettingsStore.shared.settings.selectionMaxLength)")
-        print("[selftest] 事件监听: \(SelectionMonitor.shared.isRunning ? "运行中" : "未启动")")
+        var lines: [String] = []
+        let outPath = CommandLine.arguments.first { $0.hasPrefix("--selftest-out=") }
+            .map { String($0.dropFirst("--selftest-out=".count)) }
+        // 每写一行就落一次盘：用 open 启动时 stdout 会被丢掉，只能靠文件带回结果。
+        func emit(_ s: String) {
+            print(s)
+            lines.append(s)
+            if let outPath {
+                try? lines.joined(separator: "\n").appending("\n")
+                    .write(toFile: outPath, atomically: true, encoding: .utf8)
+            }
+        }
+
+        let parent = NSRunningApplication(processIdentifier: getppid())?.localizedName ?? "?"
+        emit("[selftest] 进程: pid=\(getpid()) 父进程=\(parent)(pid=\(getppid()))")
+        emit("[selftest] 辅助功能: 缓存=\(Permissions.hasAccessibility) 实测=\(Permissions.canWorkNow) 监听=\(SelectionMonitor.shared.isRunning)")
+        emit("[selftest] 复制即译: \(ClipboardWatcher.shared.isRunning ? "运行中" : "未启动")")
+        emit("[selftest] 设置: 划词=\(SettingsStore.shared.settings.selectionTriggerEnabled) 双击直出=\(SettingsStore.shared.settings.selectionDirectOnDoubleClick) 上限=\(SettingsStore.shared.settings.selectionMaxLength)")
 
         let anchor = NSEvent.mouseLocation
         SelectionBubble.shared.show(text: "serendipity", appName: "SelfTest", anchor: anchor)
-        print("[selftest] 气泡可见: \(SelectionBubble.shared.isVisible) frame=\(SelectionBubble.shared.frame)")
-        print("[selftest] 锚点: \(anchor)")
+        emit("[selftest] 气泡可见: \(SelectionBubble.shared.isVisible) frame=\(SelectionBubble.shared.frame)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             SelectionBubble.shared.dismiss()
-            print("[selftest] 收起后可见: \(SelectionBubble.shared.isVisible)")
-            print("[selftest] 结束")
+            emit("[selftest] 收起后可见: \(SelectionBubble.shared.isVisible)")
+            emit("[selftest] 结束")
             NSApp.terminate(nil)
         }
     }
@@ -363,15 +426,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         observers.append(center.addObserver(forName: .lingoRequestVocabulary, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.openVocabulary() }
         })
-        // 用户刚在系统设置里勾上辅助功能时，回到前台就把划词监听补装上
+        // 用户刚在系统设置里勾上辅助功能时，把划词监听补装上。
+        // 不能查 Permissions.hasAccessibility：进程内缓存会把「刚授权」误判成没授权。
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self,
-                      SettingsStore.shared.settings.selectionTriggerEnabled,
-                      !SelectionMonitor.shared.isRunning,
-                      Permissions.hasAccessibility else { return }
-                self.applyTriggerSettings()
-            }
+            MainActor.assumeIsolated { self?.applyTriggerSettings() }
+        })
+        // 关键：捕词是 LSUIElement，很少自己变成前台。用户是在「系统设置」里勾授权，
+        // 勾完切走的那一刻（任意 App 被激活）才是补装监听的最好时机。
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyTriggerSettings() }
         })
     }
 }

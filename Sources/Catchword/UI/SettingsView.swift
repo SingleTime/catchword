@@ -96,11 +96,27 @@ struct GeneralTab: View {
                     Divider().padding(.vertical, 2)
 
                     HStack {
+                        Label("复制即译", systemImage: "doc.on.clipboard")
+                        Spacer()
+                        Toggle("", isOn: store.bind(\.clipboardTriggerEnabled))
+                            .labelsHidden()
+                            .onChange(of: store.settings.clipboardTriggerEnabled) { _ in
+                                AppDelegate.shared?.applyTriggerSettings()
+                            }
+                    }
+                    Text("选中文字按一下 ⌘C 就弹气泡。不需要辅助功能权限——系统不给授权时用它兜底。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider().padding(.vertical, 2)
+
+                    HStack {
                         Label("辅助功能权限", systemImage: "lock.shield")
                         Spacer()
                         PermissionBadge()
                     }
-                    Text("刚在系统设置里勾上时，已运行的进程读不到新状态——显示未授权就点「重启」。")
+                    Text("在系统设置里勾选后不用重启，这里 1~2 秒内会自动变成「已授权」，划词也会自动接上。")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -187,7 +203,7 @@ struct GeneralTab: View {
 
 @MainActor
 struct PermissionBadge: View {
-    @State private var granted = Permissions.hasAccessibility
+    @State private var granted = Permissions.canWorkNow
     @State private var ticker: Timer?
 
     var body: some View {
@@ -205,18 +221,19 @@ struct PermissionBadge: View {
                     Permissions.openAccessibilitySettings()
                 }
                 .controlSize(.small)
-                Button("重启") {
-                    AppDelegate.shared?.relaunchApp()
-                }
-                .controlSize(.small)
-                .help("已勾选但仍显示未授权时点这里：授权在进程启动时才生效")
             }
         }
         .onAppear {
-            granted = Permissions.hasAccessibility
+            granted = Permissions.canWorkNow
             ticker = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
                 Task { @MainActor in
-                    granted = Permissions.hasAccessibility
+                    // canWorkNow 会真的试着建一次事件监听，绕过 AXIsProcessTrusted 的进程内缓存，
+                    // 所以用户在系统设置里勾上后，这里 1.5 秒内就会翻成已授权。
+                    let now = Permissions.canWorkNow
+                    if now != granted { granted = now }
+                    if now, !SelectionMonitor.shared.isRunning {
+                        SelectionMonitor.shared.start()   // 权限刚生效，顺手把划词监听补上
+                    }
                 }
             }
         }

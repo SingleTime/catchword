@@ -36,6 +36,7 @@ final class SelectionBubble {
         let screen = NSScreen.screens.first { NSMouseInRect(anchor, $0.frame, false) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         if origin.y < visible.minY + 6 { origin.y = anchor.y + 8 }        // 下方放不下就翻到上面
+        if origin.y < visible.minY + 6 { origin.y = visible.minY + 6 }   // 翻转后仍越界（比如光标贴在屏幕最底）就夹住
         if origin.x + diameter > visible.maxX - 6 { origin.x = visible.maxX - diameter - 6 }
         if origin.x < visible.minX + 6 { origin.x = visible.minX + 6 }
         if origin.y + diameter > visible.maxY - 6 { origin.y = visible.maxY - diameter - 6 }

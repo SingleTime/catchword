@@ -39,10 +39,9 @@ final class SelectionMonitor {
 
     func start() {
         guard SettingsStore.shared.settings.selectionTriggerEnabled, tap == nil else { return }
-        guard Permissions.hasAccessibility else {
-            Log.e("划词监听未启动：缺少辅助功能权限")
-            return
-        }
+        // 这里刻意不检查 Permissions.hasAccessibility：AXIsProcessTrusted 在本进程内有缓存，
+        // 用户「刚勾上授权但还没重启」时它会一直报 false，把本来能用的功能挡住。
+        // 直接试着建监听即可 —— 建得出来就是有权限，建不出来才是真没权限。
         // 优先连键盘事件一起监听（覆盖 Shift+方向键选区）；
         // 有些环境只允许鼠标事件，失败就退化成纯鼠标监听。
         if attach(mask: mouseMask | keyMask) { return }
@@ -50,7 +49,7 @@ final class SelectionMonitor {
             Log.w("划词监听已启动（仅鼠标事件）")
             return
         }
-        Log.e("划词监听创建失败：CGEvent.tapCreate 返回 nil")
+        Log.e("划词监听创建失败：CGEvent.tapCreate 返回 nil（多半是缺辅助功能权限）")
     }
 
     func stop() {

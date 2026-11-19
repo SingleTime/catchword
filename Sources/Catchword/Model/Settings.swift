@@ -140,6 +140,9 @@ struct AppSettings: Codable {
     var selectionDirectOnDoubleClick: Bool = true
     /// 划词触发的最长文本长度（避免选中大段代码也弹）
     var selectionMaxLength: Int = 60
+    /// 复制即译：⌘C 之后自动弹气泡。
+    /// 这是唯一不需要辅助功能权限的取词方式，系统不给授权时靠它兜底。
+    var clipboardTriggerEnabled: Bool = true
 
     // 外观
     var fontSize: Double = 14
@@ -176,6 +179,7 @@ struct AppSettings: Codable {
         selectionTriggerEnabled = (try? d.decode(Bool.self, forKey: .selectionTriggerEnabled)) ?? def.selectionTriggerEnabled
         selectionDirectOnDoubleClick = (try? d.decode(Bool.self, forKey: .selectionDirectOnDoubleClick)) ?? def.selectionDirectOnDoubleClick
         selectionMaxLength = (try? d.decode(Int.self, forKey: .selectionMaxLength)) ?? def.selectionMaxLength
+        clipboardTriggerEnabled = (try? d.decode(Bool.self, forKey: .clipboardTriggerEnabled)) ?? def.clipboardTriggerEnabled
         fontSize = (try? d.decode(Double.self, forKey: .fontSize)) ?? def.fontSize
         panelWidth = (try? d.decode(Double.self, forKey: .panelWidth)) ?? def.panelWidth
         autoCopyTranslation = (try? d.decode(Bool.self, forKey: .autoCopyTranslation)) ?? def.autoCopyTranslation
