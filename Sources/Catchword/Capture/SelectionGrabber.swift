@@ -19,7 +19,9 @@ enum SelectionGrabber {
         let appName = app?.localizedName ?? ""
         let bundleID = app?.bundleIdentifier ?? ""
 
-        if Permissions.hasAccessibility {
+        // 用 canWorkNow 而不是 hasAccessibility：后者在本进程内被缓存，
+        // 用户刚授权时仍返回 false，会把 ⌘C 兜底这条路整条跳过。
+        if Permissions.canWorkNow {
             if let text = axSelectedText(app: app), !text.isEmpty {
                 return Capture(text: text, appName: appName, bundleID: bundleID, method: "AX")
             }

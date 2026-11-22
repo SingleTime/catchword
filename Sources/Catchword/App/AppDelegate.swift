@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWindow: NSWindow?
     private var vocabWindow: NSWindow?
     private var observers: [NSObjectProtocol] = []
+    /// 只在「未授权」期间跑的定时器，授权到位即停
+    private var permissionWatch: Timer?
     private var workspaceObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -26,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSUpdateDynamicServices()
         prewarmTranslationHost()
         applyTriggerSettings()
+        startPermissionWatch()
 
         // 首次启动：把「选中即译」的服务快捷键装好（只装一次，之后用户自己改的不会被覆盖）。
         // 这条通道不需要任何系统授权，是产品的主路径；所以不再弹「去授权」的窗口 ——
@@ -292,6 +295,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ClipboardWatcher.shared.start()
         } else {
             ClipboardWatcher.shared.stop()
+        }
+    }
+
+    /// 未授权时盯着授权状态，一旦用户勾上就静默重启自己。
+    ///
+    /// 为什么必须重启：AX 的可用性在本进程启动那一刻就定格了（`AXIsProcessTrusted` 更是带缓存），
+    /// 用户在系统设置里勾上之后，这个进程就算探测到「已授权」，真正读选区、合成 ⌘C 仍可能被拦。
+    /// 不重启的话用户会觉得「勾了还是没反应」——上一轮就是这么白折腾的。
+    /// 授权到位后这个定时器立刻停掉，不留后台轮询。
+    private func startPermissionWatch() {
+        permissionWatch?.invalidate()
+        permissionWatch = nil
+        guard !Permissions.canWorkNow else { return }
+
+        permissionWatch = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, Permissions.canWorkNow else { return }
+                self.permissionWatch?.invalidate()
+                self.permissionWatch = nil
+                // 让划词开关重新按「有授权」装一次监听，再重启进程清掉缓存
+                SettingsStore.shared.settings.selectionTriggerEnabled = true
+                self.relaunchApp()
+            }
         }
     }
 
