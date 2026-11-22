@@ -121,4 +121,15 @@ enum Permissions {
             NSWorkspace.shared.open(url)
         }
     }
+
+    /// 键盘 › 键盘快捷键 › 服务 —— 改「选中即译」那个键的地方
+    static func openKeyboardSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension"),
+           NSWorkspace.shared.open(url) {
+            return
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }

@@ -36,27 +36,49 @@ extension SettingsStore {
 @MainActor
 struct GeneralTab: View {
     @ObservedObject private var store = SettingsStore.shared
+    @State private var serviceShortcut: String? = ServiceShortcut.current
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 SectionCard(title: "取词", icon: "cursorarrow.rays") {
                     HStack {
-                        Label("取词快捷键", systemImage: "keyboard")
+                        Label("选中即译", systemImage: "highlighter")
+                        Spacer()
+                        if let eq = serviceShortcut {
+                            Text(ServiceShortcut.humanize(eq))
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(Color.secondary.opacity(0.16))
+                                )
+                            Button("改键") { Permissions.openKeyboardSettings() }
+                                .controlSize(.small)
+                        } else {
+                            Button("装上 ⌃⌘T") { installServiceShortcut() }
+                                .controlSize(.small)
+                        }
+                    }
+                    hint("在任意 App 里选中文字，按一下就直接出结果。走系统「服务」通道，系统把选区递过来 —— 不要任何安全授权，也不动剪贴板。这是零权限下最好用的一条。")
+
+                    Divider().padding(.vertical, 2)
+
+                    HStack {
+                        Label("面板快捷键", systemImage: "keyboard")
                         Spacer()
                         ShortcutRecorder(keyCode: store.bind(\.hotKeyCode),
                                          modifiers: store.bind(\.hotKeyModifiers))
                             .frame(width: 120)
                     }
-                    Text("选中文字后按下即可取词翻译；直接按（不选文字）则打开空白输入框。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    hint("唤起面板。有授权时会顺便读走选中文字；没授权时打开空白输入框，直接敲或粘贴。")
 
                     Divider().padding(.vertical, 2)
 
                     HStack {
-                        Label("划词即译", systemImage: "text.cursor")
+                        Label(Permissions.canWorkNow ? "划词自动气泡" : "划词自动气泡（未授权，已暂停）",
+                              systemImage: "text.cursor")
                         Spacer()
                         Toggle("", isOn: store.bind(\.selectionTriggerEnabled))
                             .labelsHidden()
@@ -64,10 +86,7 @@ struct GeneralTab: View {
                                 AppDelegate.shared?.applyTriggerSettings()
                             }
                     }
-                    Text("选中文字松手后，在选区右下角冒出一个「译」小圆点，点它或让鼠标停一下就展开。不用再按快捷键。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    hint("选中松手后在选区旁边冒一个「译」小圆点。这条要读别的 App 的 AX 内容，必须拿到系统级授权——macOS 26 起 Apple 把辅助功能、全盘访问、屏幕录制、键击监控合并成一张「System & App Protection Override」总表，给了就等于交出整台机器。本 App 不申请，所以没有授权时它不会工作，用上面的「选中即译」代替。")
 
                     HStack {
                         Label("双击直接展开", systemImage: "hand.tap")
@@ -104,7 +123,7 @@ struct GeneralTab: View {
                                 AppDelegate.shared?.applyTriggerSettings()
                             }
                     }
-                    Text("选中文字按一下 ⌘C 就弹气泡。不需要辅助功能权限——系统不给授权时用它兜底。")
+                    Text("选中文字按一下 ⌘C 就弹气泡——你本来就要复制，顺手就翻了。零权限，随时可用。")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -112,11 +131,11 @@ struct GeneralTab: View {
                     Divider().padding(.vertical, 2)
 
                     HStack {
-                        Label("辅助功能权限", systemImage: "lock.shield")
+                        Label("系统级授权", systemImage: "lock.shield")
                         Spacer()
                         PermissionBadge()
                     }
-                    Text("在系统设置里勾选后不用重启，这里 1~2 秒内会自动变成「已授权」，划词也会自动接上。")
+                    Text("未授权也完全能用：上面的「选中即译」和「复制即译」都不依赖它，只有「划词自动气泡」需要。授权入口在 系统设置 › 隐私与安全 › System & App Protection Override，但那是一张覆盖全盘访问/照片/浏览历史的合并授权表，自己权衡。")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -196,6 +215,22 @@ struct GeneralTab: View {
             }
             .padding(20)
         }
+        .onAppear { serviceShortcut = ServiceShortcut.current }
+    }
+
+    /// 小字说明
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// 装上「服务」快捷键。不偷偷改配置，只在这个按钮被点时写。
+    private func installServiceShortcut() {
+        if ServiceShortcut.install() {
+            serviceShortcut = ServiceShortcut.current
+        }
     }
 }
 
@@ -216,8 +251,9 @@ struct PermissionBadge: View {
                 Label("未授权", systemImage: "exclamationmark.circle.fill")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.orange)
-                Button("去授权") {
-                    Permissions.requestAccessibility()
+                Button("怎么开") {
+                    // 不主动弹授权提示：macOS 26 起弹的是一张「交出任整台机器」的总表，
+                    // 让用户自己在系统设置里决定，别替他把窗口怼到脸上。
                     Permissions.openAccessibilitySettings()
                 }
                 .controlSize(.small)

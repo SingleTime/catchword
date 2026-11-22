@@ -50,6 +50,7 @@ final class SelectionMonitor {
             return
         }
         Log.e("划词监听创建失败：CGEvent.tapCreate 返回 nil（多半是缺辅助功能权限）")
+        Diag.log("start 失败：tapCreate 返回 nil")
     }
 
     func stop() {
@@ -92,6 +93,7 @@ final class SelectionMonitor {
         source = src
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         CGEvent.tapEnable(tap: created, enable: true)
+        Diag.log("attach 成功 mask=\(mask) 已加入 main runloop")
         return true
     }
 
@@ -122,11 +124,14 @@ final class SelectionMonitor {
         case .leftMouseUp:
             let wasDrag = isDragging
             isDragging = false
+            Diag.log("mouseUp drag=\(wasDrag) click=\(clickCount) at=\(Int(point.x)),\(Int(point.y)) listen=\(shouldListen(at: point))")
             guard settings.selectionTriggerEnabled, shouldListen(at: point) else { return }
             if clickCount >= 2, settings.selectionDirectOnDoubleClick {
                 schedule(delay: 0.06, intent: .direct)
             } else if wasDrag {
                 schedule(delay: 0.18, intent: .bubble)
+            } else {
+                Diag.log("  跳过：非拖选且非双击")
             }
 
         case .keyDown:
@@ -156,39 +161,66 @@ final class SelectionMonitor {
 
     private func evaluate(intent: Intent) {
         let settings = SettingsStore.shared.settings
-        guard settings.selectionTriggerEnabled else { return }
+        guard settings.selectionTriggerEnabled else {
+            Diag.log("evaluate 放弃：划词开关关闭")
+            return
+        }
 
         // 自己在前台（比如在设置窗口里选字）不算
         let front = NSWorkspace.shared.frontmostApplication
-        if front?.processIdentifier == ProcessInfo.processInfo.processIdentifier { return }
-
-        guard let cap = SelectionGrabber.captureSelection() else {
-            if intent == .bubble { SelectionBubble.shared.dismiss() }
+        if front?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            Diag.log("evaluate 放弃：前台是捕词自己")
             return
         }
+
+        // 取词是异步的：AX 读不到时会模拟一次 ⌘C（剪贴板完整备份后恢复）
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let cap = await SelectionGrabber.captureSelectionWithFallback() else {
+                Diag.log("evaluate 放弃：AX 与 ⌘C 都没取到文本（前台=\(front?.localizedName ?? "?"))")
+                if intent == .bubble { SelectionBubble.shared.dismiss() }
+                return
+            }
+            self.deliver(cap, intent: intent)
+        }
+    }
+
+    private func deliver(_ cap: SelectionGrabber.Capture, intent: Intent) {
+        let settings = SettingsStore.shared.settings
         let text = cap.text
         // 单行、长度可控，才认为用户是在"查词/查句"，而不是在编辑大段代码
         guard !text.contains("\n"),
               text.count >= settings.minWordLength,
               text.count <= settings.selectionMaxLength
         else {
+            Diag.log("evaluate 放弃：文本不合格 len=\(text.count) 换行=\(text.contains("\n")) 区间=\(settings.minWordLength)...\(settings.selectionMaxLength)")
             if intent == .bubble { SelectionBubble.shared.dismiss() }
             return
         }
         // 同一段文字短时间内不重复弹（拖选时会连发多次）
-        if text == lastText, Date().timeIntervalSince(lastFireAt) < 1.2 { return }
+        if text == lastText, Date().timeIntervalSince(lastFireAt) < 1.2 {
+            Diag.log("evaluate 放弃：1.2s 内重复")
+            return
+        }
         lastText = text
         lastFireAt = Date()
+        Diag.log("evaluate 文本=\(text.prefix(30)) app=\(cap.appName) 方式=\(cap.method) intent=\(intent)")
 
         let anchor = SelectionGrabber.selectionAnchor() ?? cocoaPoint(CGEvent(source: nil)?.location ?? .zero)
+        Diag.log("  anchor=\(Int(anchor.x)),\(Int(anchor.y)) 命中选择区矩形=\(SelectionGrabber.selectionAnchor() != nil)")
 
         switch intent {
         case .direct:
             SelectionBubble.shared.dismiss()
             PanelController.shared.show(text: text, appName: cap.appName, near: anchor)
+            Diag.log("  面板可见=\(PanelController.shared.isVisible) frame=\(PanelController.shared.frame)")
         case .bubble:
-            if PanelController.shared.isVisible { return }
+            if PanelController.shared.isVisible {
+                Diag.log("  跳过气泡：面板已打开")
+                return
+            }
             SelectionBubble.shared.show(text: text, appName: cap.appName, anchor: anchor)
+            Diag.log("  气泡可见=\(SelectionBubble.shared.isVisible) frame=\(SelectionBubble.shared.frame)")
         }
     }
 

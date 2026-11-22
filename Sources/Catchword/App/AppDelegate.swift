@@ -27,13 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         prewarmTranslationHost()
         applyTriggerSettings()
 
-        // 首次启动：提示授权
-        if !Permissions.canWorkNow,
-           !UserDefaults.standard.bool(forKey: "didPromptAccessibility") {
-            UserDefaults.standard.set(true, forKey: "didPromptAccessibility")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.promptAccessibility()
-            }
+        // 首次启动：把「选中即译」的服务快捷键装好（只装一次，之后用户自己改的不会被覆盖）。
+        // 这条通道不需要任何系统授权，是产品的主路径；所以不再弹「去授权」的窗口 ——
+        // macOS 26 起那张授权表等于交出整台机器，一个翻译工具不该开这个口。
+        if !UserDefaults.standard.bool(forKey: "didInstallServiceShortcut") {
+            UserDefaults.standard.set(true, forKey: "didInstallServiceShortcut")
+            if ServiceShortcut.current == nil { ServiceShortcut.install() }
         }
 
         // 主动请求辅助功能授权：系统会弹「捕词想要控制这台电脑」并把本 app 登记进列表
@@ -206,9 +205,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        // 主路径放在最上面：选中即译走系统「服务」，零权限
+        let svcTitle = ServiceShortcut.current
+            .map { "选中即译（\(ServiceShortcut.humanize($0))）" }
+            ?? "装上「选中即译」快捷键 ⌃⌘T"
+        let svc = NSMenuItem(title: svcTitle, action: #selector(menuServiceShortcut), keyEquivalent: "")
+        svc.target = self
+        menu.addItem(svc)
+
         // 用 canWorkNow 而不是 hasAccessibility：后者在进程内被缓存，
         // 用户刚在系统设置里勾上时这里仍会显示未授权。
-        let permTitle = Permissions.canWorkNow ? "辅助功能权限：已授权 ✓" : "辅助功能权限：未授权（点击授权）"
+        let permTitle = Permissions.canWorkNow ? "划词自动气泡：已授权 ✓" : "划词自动气泡：未授权（需系统级总授权）"
         let perm = NSMenuItem(title: permTitle, action: #selector(menuPermission), keyEquivalent: "")
         perm.target = self
         menu.addItem(perm)
@@ -272,8 +279,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 设置里改「划词即译」后调用，按需装/卸事件监听
     func applyTriggerSettings() {
-        if SettingsStore.shared.settings.selectionTriggerEnabled {
-            // 权限可能是刚授的，每次回到前台都试一次
+        // 划词自动气泡要读别的 App 的 AX，没有系统级授权时装了也是白跑 ——
+        // 不如不装：省电，也不会让用户以为「开了在等」其实永远不会响。
+        if SettingsStore.shared.settings.selectionTriggerEnabled && Permissions.canWorkNow {
             SelectionMonitor.shared.start()
         } else {
             SelectionMonitor.shared.stop()
@@ -329,12 +337,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         Task { @MainActor in
-            let hasPermission = Permissions.hasAccessibility
+            let hasPermission = Permissions.canWorkNow
             if let cap = await SelectionGrabber.capture(), !cap.text.isEmpty {
                 PanelController.shared.show(text: cap.text, appName: cap.appName)
             } else if !hasPermission {
                 PanelController.shared.showEmpty(
-                    hint: "未获「辅助功能」权限，无法自动读取选中文字。可直接输入，或到 设置 › 通用 里授权。")
+                    hint: "没读到选中文字 —— 系统没给这个 App 读选区的授权。想一步到位的话：选中文字后按 ⌃⌘T（走系统服务，不需要授权）。这里也可以直接输入。")
             } else {
                 PanelController.shared.showEmpty(hint: "没读到选中的文字，直接输入也行。")
             }
@@ -352,6 +360,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuPermission() {
         Permissions.requestAccessibility()
         Permissions.openAccessibilitySettings()
+    }
+
+    /// 没装就装，装了就去改键
+    @objc private func menuServiceShortcut() {
+        if ServiceShortcut.current == nil {
+            ServiceShortcut.install()
+        } else {
+            Permissions.openKeyboardSettings()
+        }
     }
 
     @objc private func menuOpenDataFolder() {
@@ -395,26 +412,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - 授权提示
-
-    private func promptAccessibility() {
-        let alert = NSAlert()
-        alert.messageText = "捕词需要「辅助功能」权限"
-        alert.informativeText = """
-        用于读取你在任意 App 中选中的文字（并模拟 ⌘C 作为兜底）。
-        文字只在本机处理，不会上传；只有当你选择了云端大模型服务时，才会把待翻译内容发给你自己配置的接口。
-
-        授权路径：系统设置 › 隐私与安全性 › 辅助功能 → 勾选「捕词」。
-        """
-        alert.addButton(withTitle: "去授权")
-        alert.addButton(withTitle: "稍后")
-        alert.alertStyle = .informational
-
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            Permissions.requestAccessibility()
-            Permissions.openAccessibilitySettings()
-        }
-    }
 
     // MARK: - 通知
 

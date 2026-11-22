@@ -36,10 +36,37 @@ enum SelectionGrabber {
         return nil
     }
 
-    // MARK: - 划词触发用（只读 AX）
+    // MARK: - 划词触发用
 
-    /// 划词场景下不能用「模拟 ⌘C」兜底：那会把用户刚选好的选区搞没。
-    /// 拿不到就返回 nil，让调用方安静地什么都不做。
+    /// 划词场景取词：AX 优先，读不到时用一次 ⌘C 兜底。
+    ///
+    /// 为什么可以兜底：⌘C 只是复制，**不会取消选区**，拖选刚结束的这一刻复制是安全的；
+    /// 剪贴板在复制前后完整备份并恢复，用户感知不到。
+    /// 这一步很关键 —— Chrome / VS Code / PDF / 终端里 `kAXSelectedTextAttribute`
+    /// 经常返回空，只靠 AX 会让「划词即译」在这些 App 里彻底失效。
+    static func captureSelectionWithFallback() async -> Capture? {
+        let app = NSWorkspace.shared.frontmostApplication
+        let appName = app?.localizedName ?? ""
+        let bundleID = app?.bundleIdentifier ?? ""
+
+        // 调试开关：强制走 ⌘C，用于验证兜底路径
+        if ProcessInfo.processInfo.environment["CATCHWORD_FORCE_COPY"] == "1" {
+            Diag.log("强制模式：跳过 AX，直接模拟 ⌘C")
+        } else if let text = axSelectedText(app: app), !text.isEmpty {
+            Diag.log("取词成功（AX）: \(text.prefix(24))")
+            return Capture(text: text, appName: appName, bundleID: bundleID, method: "AX")
+        }
+
+        Diag.log("AX 未取到选中文本，回退模拟 ⌘C（app=\(appName)）")
+        guard let text = await copySelectedText(), !text.isEmpty else {
+            Diag.log("⌘C 兜底也失败")
+            return nil
+        }
+        Diag.log("取词成功（⌘C）: \(text.prefix(24))")
+        return Capture(text: text, appName: appName, bundleID: bundleID, method: "⌘C")
+    }
+
+    /// 只读 AX、不做任何副作用（热键路径里仍需权限判定时用）
     static func captureSelection() -> Capture? {
         let app = NSWorkspace.shared.frontmostApplication
         guard let text = axSelectedText(app: app) else { return nil }
@@ -94,19 +121,56 @@ enum SelectionGrabber {
         guard let app else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
 
+        // 1) App 的焦点元素（绝大多数情况）
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let focused,
-              CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
-        let element = focused as! AXUIElement
+        if AXUIElementCopyAttributeValue(axApp, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+           let focused,
+           CFGetTypeID(focused) == AXUIElementGetTypeID(),
+           let text = selectedText(of: focused as! AXUIElement) {
+            return text
+        }
 
+        // 2) 系统级焦点元素：少数 App 只有这条路径通
+        let systemWide = AXUIElementCreateSystemWide()
+        var globalFocused: CFTypeRef?
+        if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &globalFocused) == .success,
+           let globalFocused,
+           CFGetTypeID(globalFocused) == AXUIElementGetTypeID(),
+           let text = selectedText(of: globalFocused as! AXUIElement) {
+            return text
+        }
+        return nil
+    }
+
+    /// 单个元素上尝试两条取值路径：AXSelectedText → AXSelectedTextRange + AXStringForRange
+    private static func selectedText(of element: AXUIElement) -> String? {
         var value: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success,
            let s = value as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
         }
-        return nil
+
+        // 有些 App 只提供选区 range，不提供选中字符串
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeRef,
+              CFGetTypeID(rangeRef) == AXValueGetTypeID()
+        else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(rangeRef as! AXValue, .cfRange, &range),
+              range.length > 0, range.length < 4000
+        else { return nil }
+
+        var strRef: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element,
+                                                         kAXStringForRangeParameterizedAttribute as CFString,
+                                                         rangeRef,
+                                                         &strRef) == .success,
+              let s = strRef as? String
+        else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: - 模拟 ⌘C
